@@ -22,52 +22,52 @@ const exchange = new ccxt.binanceusdm({
 
 const CONFIG = {
   // ===== 盤整檢查參數 =====
-  /** 
+  /**
    * 盤整檢查：最近N根K線的範圍比例需小於此值才算盤整
    * 當前: 0.12 (12%) - 範圍越小越嚴格
    * 放寬: 0.15-0.20 (15%-20%) - 允許更大的價格波動範圍
    */
-  COMPRESSION_RANGE_RATIO: 0.12,
-  /** 
+  COMPRESSION_RANGE_RATIO: 0.2,
+  /**
    * 盤整檢查：使用最近多少根4h K線來判斷盤整
    * 當前: 40根 (約6.7天)
    * 放寬: 30-35根 - 縮短判斷週期，更容易符合
    */
-  COMPRESSION_CANDLE_COUNT: 40,
+  COMPRESSION_CANDLE_COUNT: 30,
 
   // ===== 突破檢查參數 =====
-  /** 
+  /**
    * 突破檢查：使用最近多少根4h K線來計算阻力位
    * 當前: 50根 (約8.3天)
    * 通常不需要調整
    */
   BREAKOUT_CANDLE_COUNT: 50,
-  /** 
+  /**
    * 突破檢查：成交量需大於平均成交量的多少倍才算放量
    * 當前: 1.5倍 - 倍數越高越嚴格
    * 放寬: 1.2-1.3倍 - 降低成交量要求
    */
-  BREAKOUT_VOLUME_MULTIPLIER: 1.5,
-  /** 
+  BREAKOUT_VOLUME_MULTIPLIER: 1.2,
+  /**
    * 突破檢查：成交量移動平均線的週期
    * 當前: 20根
    * 通常不需要調整
    */
   BREAKOUT_VOLUME_MA_PERIOD: 20,
-  /** 
+  /**
    * 突破檢查：收盤價需大於阻力位的多少倍才算突破
    * 當前: 1.002 (0.2%) - 倍數越高越嚴格
    * 放寬: 1.001 (0.1%) - 降低突破幅度要求
    */
-  BREAKOUT_PRICE_MULTIPLIER: 1.002,
+  BREAKOUT_PRICE_MULTIPLIER: 1.001,
 
   // ===== 回踩檢查參數 =====
-  /** 
+  /**
    * 回踩檢查：低點需大於等於阻力位的多少倍
    * 當前: 0.995 (99.5%) - 允許回踩到阻力位下方0.5%
    * 放寬: 0.99-0.992 (99%-99.2%) - 允許更深的回踩
    */
-  RETEST_LOW_MULTIPLIER: 0.995,
+  RETEST_LOW_MULTIPLIER: 0.99,
   /** 回踩檢查：收盤價需大於阻力位 */
 
   // ===== K線數據參數 =====
@@ -118,7 +118,11 @@ function formatDuration(ms: number): string {
   return `${m}m${String(ss).padStart(2, "0")}s`;
 }
 
-function renderProgressBar(done: number, total: number, width = CONFIG.PROGRESS_BAR_WIDTH): string {
+function renderProgressBar(
+  done: number,
+  total: number,
+  width = CONFIG.PROGRESS_BAR_WIDTH,
+): string {
   if (total <= 0) return `[${" ".repeat(width)}]`;
   const ratio = Math.min(1, Math.max(0, done / total));
   const filled = Math.round(ratio * width);
@@ -175,9 +179,15 @@ async function fetchOHLCV(
   timeframe: "15m" | "4h",
   limit?: number,
 ): Promise<Candle[]> {
-  const defaultLimit = timeframe === "4h" ? CONFIG.CANDLE_4H_LIMIT : CONFIG.CANDLE_15M_LIMIT;
+  const defaultLimit =
+    timeframe === "4h" ? CONFIG.CANDLE_4H_LIMIT : CONFIG.CANDLE_15M_LIMIT;
   const actualLimit = limit ?? defaultLimit;
-  const raw = await exchange.fetchOHLCV(symbol, timeframe, undefined, actualLimit);
+  const raw = await exchange.fetchOHLCV(
+    symbol,
+    timeframe,
+    undefined,
+    actualLimit,
+  );
   return raw.map((c) => ({
     timestamp: c[0] as number,
     open: c[1] as number,
@@ -238,7 +248,10 @@ function isBreakout(candles: Candle[]): {
 // 回踩確認
 function isValidRetest(candles: Candle[], resistance: number): boolean {
   const last = candles[candles.length - 1];
-  return last.low >= resistance * CONFIG.RETEST_LOW_MULTIPLIER && last.close > resistance;
+  return (
+    last.low >= resistance * CONFIG.RETEST_LOW_MULTIPLIER &&
+    last.close > resistance
+  );
 }
 
 /* =======================
@@ -323,10 +336,18 @@ async function main() {
 
   console.log("\n=== 掃描統計 ===");
   console.log(`總數: ${symbols.length}`);
-  console.log(`通過盤整檢查: ${symbols.length - stats.compression} (${((symbols.length - stats.compression) / symbols.length * 100).toFixed(1)}%)`);
-  console.log(`通過突破檢查: ${stats.breakout + stats.retest + stats.success} (${((stats.breakout + stats.retest + stats.success) / symbols.length * 100).toFixed(1)}%)`);
-  console.log(`通過回踩檢查: ${stats.retest + stats.success} (${((stats.retest + stats.success) / symbols.length * 100).toFixed(1)}%)`);
-  console.log(`最終符合條件: ${stats.success} (${(stats.success / symbols.length * 100).toFixed(1)}%)`);
+  console.log(
+    `通過盤整檢查: ${symbols.length - stats.compression} (${(((symbols.length - stats.compression) / symbols.length) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `通過突破檢查: ${stats.breakout + stats.retest + stats.success} (${(((stats.breakout + stats.retest + stats.success) / symbols.length) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `通過回踩檢查: ${stats.retest + stats.success} (${(((stats.retest + stats.success) / symbols.length) * 100).toFixed(1)}%)`,
+  );
+  console.log(
+    `最終符合條件: ${stats.success} (${((stats.success / symbols.length) * 100).toFixed(1)}%)`,
+  );
   console.log(`錯誤: ${stats.error}`);
   console.log("\n=== 過濾階段 ===");
   console.log(`❌ 未通過盤整檢查: ${stats.compression}`);
@@ -337,10 +358,18 @@ async function main() {
   if (results.length === 0) {
     console.log("\nNo valid breakout found.");
     console.log("\n提示: 條件較嚴格，可能需要調整參數：");
-    console.log(`  - COMPRESSION_RANGE_RATIO: ${CONFIG.COMPRESSION_RANGE_RATIO} (目前需 < ${(CONFIG.COMPRESSION_RANGE_RATIO * 100).toFixed(1)}%)`);
-    console.log(`  - BREAKOUT_VOLUME_MULTIPLIER: ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER} (目前需 > ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER}倍)`);
-    console.log(`  - 突破價格需 > 阻力 * ${CONFIG.BREAKOUT_PRICE_MULTIPLIER} (${((CONFIG.BREAKOUT_PRICE_MULTIPLIER - 1) * 100).toFixed(2)}%)`);
-    console.log(`  - 回踩低點需 >= 阻力 * ${CONFIG.RETEST_LOW_MULTIPLIER} (${((1 - CONFIG.RETEST_LOW_MULTIPLIER) * 100).toFixed(1)}%) 且收盤 > 阻力`);
+    console.log(
+      `  - COMPRESSION_RANGE_RATIO: ${CONFIG.COMPRESSION_RANGE_RATIO} (目前需 < ${(CONFIG.COMPRESSION_RANGE_RATIO * 100).toFixed(1)}%)`,
+    );
+    console.log(
+      `  - BREAKOUT_VOLUME_MULTIPLIER: ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER} (目前需 > ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER}倍)`,
+    );
+    console.log(
+      `  - 突破價格需 > 阻力 * ${CONFIG.BREAKOUT_PRICE_MULTIPLIER} (${((CONFIG.BREAKOUT_PRICE_MULTIPLIER - 1) * 100).toFixed(2)}%)`,
+    );
+    console.log(
+      `  - 回踩低點需 >= 阻力 * ${CONFIG.RETEST_LOW_MULTIPLIER} (${((1 - CONFIG.RETEST_LOW_MULTIPLIER) * 100).toFixed(1)}%) 且收盤 > 阻力`,
+    );
   } else {
     console.log("\n=== 結果摘要 ===");
     console.table(results);

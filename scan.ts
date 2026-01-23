@@ -79,6 +79,10 @@ const CONFIG = {
   // ===== UI顯示參數 =====
   /** 進度條寬度（字符數） */
   PROGRESS_BAR_WIDTH: 24,
+
+  // ===== 效能參數 =====
+  /** 並行處理的標的數量（同時處理多少個標的） */
+  CONCURRENCY_LIMIT: 10,
 } as const;
 
 async function getAllTradableSymbols(): Promise<string[]> {
@@ -199,11 +203,29 @@ async function fetchOHLCV(
 }
 
 function sma(values: number[], period: number): number[] {
-  return values.map((_, i) =>
-    i < period
-      ? NaN
-      : values.slice(i - period, i).reduce((a, b) => a + b, 0) / period,
-  );
+  const result: number[] = new Array(values.length);
+  
+  // 前 period 個元素為 NaN
+  for (let i = 0; i < period && i < values.length; i++) {
+    result[i] = NaN;
+  }
+  
+  // 計算第一個有效值
+  if (values.length > period) {
+    let sum = 0;
+    for (let i = 0; i < period; i++) {
+      sum += values[i];
+    }
+    result[period] = sum / period;
+    
+    // 使用滑動窗口計算後續值（O(n) 而非 O(n²)）
+    for (let i = period + 1; i < values.length; i++) {
+      sum = sum - values[i - period - 1] + values[i - 1];
+      result[i] = sum / period;
+    }
+  }
+  
+  return result;
 }
 
 /* =======================
@@ -213,11 +235,16 @@ function sma(values: number[], period: number): number[] {
 // 盤整 / 收斂
 function isCompression(candles: Candle[]): boolean {
   const recent = candles.slice(-CONFIG.COMPRESSION_CANDLE_COUNT);
-  const highs = recent.map((c) => c.high);
-  const lows = recent.map((c) => c.low);
+  
+  // 單次遍歷找出最高和最低
+  let maxHigh = recent[0].high;
+  let minLow = recent[0].low;
+  for (let i = 1; i < recent.length; i++) {
+    if (recent[i].high > maxHigh) maxHigh = recent[i].high;
+    if (recent[i].low < minLow) minLow = recent[i].low;
+  }
 
-  const range = Math.max(...highs) - Math.min(...lows);
-
+  const range = maxHigh - minLow;
   const rangeRatio = range / recent[recent.length - 1].close;
   return rangeRatio < CONFIG.COMPRESSION_RANGE_RATIO;
 }
@@ -230,7 +257,13 @@ function isBreakout(candles: Candle[]): {
   const recent = candles.slice(-CONFIG.BREAKOUT_CANDLE_COUNT);
   const last = recent[recent.length - 1];
 
-  const resistance = Math.max(...recent.slice(0, -1).map((c) => c.high));
+  // 計算阻力位（排除最後一根K線）
+  let resistance = 0;
+  for (let i = 0; i < recent.length - 1; i++) {
+    if (recent[i].high > resistance) {
+      resistance = recent[i].high;
+    }
+  }
 
   const volumes = recent.map((c) => c.volume);
   const volMA = sma(volumes, CONFIG.BREAKOUT_VOLUME_MA_PERIOD);
@@ -252,6 +285,39 @@ function isValidRetest(candles: Candle[], resistance: number): boolean {
     last.low >= resistance * CONFIG.RETEST_LOW_MULTIPLIER &&
     last.close > resistance
   );
+}
+
+/* =======================
+   並行處理工具
+======================= */
+
+/**
+ * 並行處理陣列，控制並發數量
+ */
+async function pMap<T, R>(
+  items: T[],
+  mapper: (item: T, index: number) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= items.length) break;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < workerCount; i++) {
+    workers.push(worker());
+  }
+
+  await Promise.all(workers);
+  return results;
 }
 
 /* =======================
@@ -316,16 +382,27 @@ async function main() {
   let done = 0;
   updateProgressLine({ done, total: symbols.length, startedAtMs });
 
-  for (const symbol of symbols) {
-    const scanResult = await scanSymbol(symbol);
-    done += 1;
+  // 使用並行處理加速掃描
+  const scanResults = await pMap(
+    symbols,
+    async (symbol) => {
+      const scanResult = await scanSymbol(symbol);
+      // 使用原子性更新進度（done 的更新在單一 Promise 中，所以是安全的）
+      const currentDone = ++done;
+      updateProgressLine({
+        done: currentDone,
+        total: symbols.length,
+        startedAtMs,
+        currentSymbol: symbol,
+      });
+      return scanResult;
+    },
+    CONFIG.CONCURRENCY_LIMIT,
+  );
+
+  // 收集結果和統計
+  for (const scanResult of scanResults) {
     stats[scanResult.stage] += 1;
-    updateProgressLine({
-      done,
-      total: symbols.length,
-      startedAtMs,
-      currentSymbol: symbol,
-    });
     if (scanResult.result) {
       results.push(scanResult.result);
       console.log("FOUND:", scanResult.result);

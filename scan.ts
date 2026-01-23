@@ -81,8 +81,13 @@ const CONFIG = {
   PROGRESS_BAR_WIDTH: 24,
 
   // ===== 效能參數 =====
-  /** 並行處理的標的數量（同時處理多少個標的） */
+  /** 並行處理的標的數量（同時處理多少個標的）
+   * 注意：如果 enableRateLimit 為 true，ccxt 會自動控制速率，
+   * 過高的並發數可能不會提升速度，反而會增加等待時間
+   */
   CONCURRENCY_LIMIT: 10,
+  /** 進度更新間隔（毫秒）- 降低更新頻率以減少 I/O 開銷 */
+  PROGRESS_UPDATE_INTERVAL_MS: 100,
 } as const;
 
 async function getAllTradableSymbols(): Promise<string[]> {
@@ -380,25 +385,36 @@ async function main() {
 
   const startedAtMs = Date.now();
   let done = 0;
+
   updateProgressLine({ done, total: symbols.length, startedAtMs });
+
+  // 使用定時器定期更新進度（避免競爭條件，減少 I/O 開銷）
+  const progressInterval = setInterval(() => {
+    updateProgressLine({
+      done,
+      total: symbols.length,
+      startedAtMs,
+    });
+  }, CONFIG.PROGRESS_UPDATE_INTERVAL_MS);
 
   // 使用並行處理加速掃描
   const scanResults = await pMap(
     symbols,
     async (symbol) => {
       const scanResult = await scanSymbol(symbol);
-      // 使用原子性更新進度（done 的更新在單一 Promise 中，所以是安全的）
-      const currentDone = ++done;
-      updateProgressLine({
-        done: currentDone,
-        total: symbols.length,
-        startedAtMs,
-        currentSymbol: symbol,
-      });
+      done += 1;
       return scanResult;
     },
     CONFIG.CONCURRENCY_LIMIT,
   );
+
+  // 停止定時器並最終更新一次進度
+  clearInterval(progressInterval);
+  updateProgressLine({
+    done: symbols.length,
+    total: symbols.length,
+    startedAtMs,
+  });
 
   // 收集結果和統計
   for (const scanResult of scanResults) {

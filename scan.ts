@@ -8,16 +8,28 @@ const exchange = new ccxt.binanceusdm({
   enableRateLimit: true,
 });
 
-const SYMBOLS = [
-  "BTC/USDT:USDT",
-  "ETH/USDT:USDT",
-  "SOL/USDT:USDT",
-  "AVAX/USDT:USDT",
-  "LINK/USDT:USDT",
-  "BNB/USDT:USDT",
-  "OP/USDT:USDT",
-  "ARB/USDT:USDT",
-];
+async function getAllTradableSymbols(): Promise<string[]> {
+  // Pull latest market list (symbols can change over time)
+  await exchange.loadMarkets(true);
+
+  const markets = exchange.markets ?? {};
+  const symbols = Object.keys(markets).filter((symbol) => {
+    const m: any = (markets as any)[symbol];
+    if (!m) return false;
+
+    // Prefer USDT-margined perpetual swaps on Binance USD-M
+    const active = m.active !== false;
+    const isSwap = m.swap === true;
+    const linear = m.linear === true;
+    const quoteIsUSDT = m.quote === "USDT";
+
+    return active && isSwap && linear && quoteIsUSDT;
+  });
+
+  // Stable order for nicer diffs/logs
+  symbols.sort();
+  return symbols;
+}
 
 const COMPRESSION_RANGE_RATIO = 0.12;
 const BREAKOUT_VOLUME_MULTIPLIER = 1.5;
@@ -138,9 +150,12 @@ async function scanSymbol(symbol: string) {
 async function main() {
   console.log("Scanning futures market...\n");
 
+  const symbols = await getAllTradableSymbols();
+  console.log(`Loaded ${symbols.length} tradable symbols.\n`);
+
   const results = [];
 
-  for (const symbol of SYMBOLS) {
+  for (const symbol of symbols) {
     const res = await scanSymbol(symbol);
     if (res) {
       results.push(res);

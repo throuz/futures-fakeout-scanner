@@ -1,4 +1,5 @@
 import ccxt from "ccxt";
+import * as readline from "node:readline";
 
 /* =======================
    基本設定
@@ -33,6 +34,55 @@ async function getAllTradableSymbols(): Promise<string[]> {
 
 const COMPRESSION_RANGE_RATIO = 0.12;
 const BREAKOUT_VOLUME_MULTIPLIER = 1.5;
+
+/* =======================
+   進度顯示
+======================= */
+
+function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0)
+    return `${h}h${String(m).padStart(2, "0")}m${String(ss).padStart(2, "0")}s`;
+  return `${m}m${String(ss).padStart(2, "0")}s`;
+}
+
+function renderProgressBar(done: number, total: number, width = 24): string {
+  if (total <= 0) return `[${" ".repeat(width)}]`;
+  const ratio = Math.min(1, Math.max(0, done / total));
+  const filled = Math.round(ratio * width);
+  return `[${"=".repeat(filled)}${" ".repeat(Math.max(0, width - filled))}]`;
+}
+
+function updateProgressLine(opts: {
+  done: number;
+  total: number;
+  startedAtMs: number;
+  currentSymbol?: string;
+}) {
+  if (!process.stdout.isTTY) return;
+
+  const { done, total, startedAtMs, currentSymbol } = opts;
+  const now = Date.now();
+  const elapsedMs = now - startedAtMs;
+  const pct = total > 0 ? ((done / total) * 100).toFixed(1) : "0.0";
+  const rate = done > 0 ? done / Math.max(1, elapsedMs / 1000) : 0;
+  const remaining = Math.max(0, total - done);
+  const etaMs = rate > 0 ? (remaining / rate) * 1000 : 0;
+
+  const line =
+    `${renderProgressBar(done, total)} ` +
+    `${done}/${total} (${pct}%) ` +
+    `elapsed ${formatDuration(elapsedMs)} ` +
+    (rate > 0 ? `ETA ${formatDuration(etaMs)} ` : "") +
+    (currentSymbol ? `| ${currentSymbol}` : "");
+
+  readline.clearLine(process.stdout, 0);
+  readline.cursorTo(process.stdout, 0);
+  process.stdout.write(line);
+}
 
 /* =======================
    型別
@@ -155,13 +205,26 @@ async function main() {
 
   const results = [];
 
+  const startedAtMs = Date.now();
+  let done = 0;
+  updateProgressLine({ done, total: symbols.length, startedAtMs });
+
   for (const symbol of symbols) {
     const res = await scanSymbol(symbol);
+    done += 1;
+    updateProgressLine({
+      done,
+      total: symbols.length,
+      startedAtMs,
+      currentSymbol: symbol,
+    });
     if (res) {
       results.push(res);
       console.log("FOUND:", res);
     }
   }
+
+  if (process.stdout.isTTY) process.stdout.write("\n");
 
   if (results.length === 0) {
     console.log("No valid breakout found.");

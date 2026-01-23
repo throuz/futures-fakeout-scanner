@@ -9,6 +9,43 @@ const exchange = new ccxt.binanceusdm({
   enableRateLimit: true,
 });
 
+/* =======================
+   可調參數配置
+======================= */
+
+const CONFIG = {
+  // ===== 盤整檢查參數 =====
+  /** 盤整檢查：最近N根K線的範圍比例需小於此值才算盤整 (0.12 = 12%) */
+  COMPRESSION_RANGE_RATIO: 0.12,
+  /** 盤整檢查：使用最近多少根4h K線來判斷盤整 */
+  COMPRESSION_CANDLE_COUNT: 40,
+
+  // ===== 突破檢查參數 =====
+  /** 突破檢查：使用最近多少根4h K線來計算阻力位 */
+  BREAKOUT_CANDLE_COUNT: 50,
+  /** 突破檢查：成交量需大於平均成交量的多少倍才算放量 */
+  BREAKOUT_VOLUME_MULTIPLIER: 1.5,
+  /** 突破檢查：成交量移動平均線的週期 */
+  BREAKOUT_VOLUME_MA_PERIOD: 20,
+  /** 突破檢查：收盤價需大於阻力位的多少倍才算突破 (1.002 = 0.2%) */
+  BREAKOUT_PRICE_MULTIPLIER: 1.002,
+
+  // ===== 回踩檢查參數 =====
+  /** 回踩檢查：低點需大於等於阻力位的多少倍 (0.995 = 99.5%) */
+  RETEST_LOW_MULTIPLIER: 0.995,
+  /** 回踩檢查：收盤價需大於阻力位 */
+
+  // ===== K線數據參數 =====
+  /** 4h K線：獲取多少根K線數據 */
+  CANDLE_4H_LIMIT: 200,
+  /** 15m K線：獲取多少根K線數據 */
+  CANDLE_15M_LIMIT: 100,
+
+  // ===== UI顯示參數 =====
+  /** 進度條寬度（字符數） */
+  PROGRESS_BAR_WIDTH: 24,
+} as const;
+
 async function getAllTradableSymbols(): Promise<string[]> {
   // Pull latest market list (symbols can change over time)
   await exchange.loadMarkets(true);
@@ -32,9 +69,6 @@ async function getAllTradableSymbols(): Promise<string[]> {
   return symbols;
 }
 
-const COMPRESSION_RANGE_RATIO = 0.12;
-const BREAKOUT_VOLUME_MULTIPLIER = 1.5;
-
 /* =======================
    進度顯示
 ======================= */
@@ -49,7 +83,7 @@ function formatDuration(ms: number): string {
   return `${m}m${String(ss).padStart(2, "0")}s`;
 }
 
-function renderProgressBar(done: number, total: number, width = 24): string {
+function renderProgressBar(done: number, total: number, width = CONFIG.PROGRESS_BAR_WIDTH): string {
   if (total <= 0) return `[${" ".repeat(width)}]`;
   const ratio = Math.min(1, Math.max(0, done / total));
   const filled = Math.round(ratio * width);
@@ -104,9 +138,11 @@ interface Candle {
 async function fetchOHLCV(
   symbol: string,
   timeframe: "15m" | "4h",
-  limit = 200,
+  limit?: number,
 ): Promise<Candle[]> {
-  const raw = await exchange.fetchOHLCV(symbol, timeframe, undefined, limit);
+  const defaultLimit = timeframe === "4h" ? CONFIG.CANDLE_4H_LIMIT : CONFIG.CANDLE_15M_LIMIT;
+  const actualLimit = limit ?? defaultLimit;
+  const raw = await exchange.fetchOHLCV(symbol, timeframe, undefined, actualLimit);
   return raw.map((c) => ({
     timestamp: c[0] as number,
     open: c[1] as number,
@@ -131,14 +167,14 @@ function sma(values: number[], period: number): number[] {
 
 // 盤整 / 收斂
 function isCompression(candles: Candle[]): boolean {
-  const recent = candles.slice(-40);
+  const recent = candles.slice(-CONFIG.COMPRESSION_CANDLE_COUNT);
   const highs = recent.map((c) => c.high);
   const lows = recent.map((c) => c.low);
 
   const range = Math.max(...highs) - Math.min(...lows);
 
   const rangeRatio = range / recent[recent.length - 1].close;
-  return rangeRatio < COMPRESSION_RANGE_RATIO;
+  return rangeRatio < CONFIG.COMPRESSION_RANGE_RATIO;
 }
 
 // 放量突破
@@ -146,17 +182,17 @@ function isBreakout(candles: Candle[]): {
   ok: boolean;
   resistance: number;
 } {
-  const recent = candles.slice(-50);
+  const recent = candles.slice(-CONFIG.BREAKOUT_CANDLE_COUNT);
   const last = recent[recent.length - 1];
 
   const resistance = Math.max(...recent.slice(0, -1).map((c) => c.high));
 
   const volumes = recent.map((c) => c.volume);
-  const volMA = sma(volumes, 20);
+  const volMA = sma(volumes, CONFIG.BREAKOUT_VOLUME_MA_PERIOD);
   const volumeOK =
-    last.volume > volMA[volMA.length - 1] * BREAKOUT_VOLUME_MULTIPLIER;
+    last.volume > volMA[volMA.length - 1] * CONFIG.BREAKOUT_VOLUME_MULTIPLIER;
 
-  const priceOK = last.close > resistance * 1.002;
+  const priceOK = last.close > resistance * CONFIG.BREAKOUT_PRICE_MULTIPLIER;
 
   return {
     ok: priceOK && volumeOK,
@@ -167,7 +203,7 @@ function isBreakout(candles: Candle[]): {
 // 回踩確認
 function isValidRetest(candles: Candle[], resistance: number): boolean {
   const last = candles[candles.length - 1];
-  return last.low >= resistance * 0.995 && last.close > resistance;
+  return last.low >= resistance * CONFIG.RETEST_LOW_MULTIPLIER && last.close > resistance;
 }
 
 /* =======================
@@ -194,7 +230,7 @@ async function scanSymbol(symbol: string): Promise<{
       return { result: null, stage: "breakout" };
     }
 
-    const candles15m = await fetchOHLCV(symbol, "15m", 100);
+    const candles15m = await fetchOHLCV(symbol, "15m");
     if (!isValidRetest(candles15m, breakout.resistance)) {
       return { result: null, stage: "retest" };
     }
@@ -266,10 +302,10 @@ async function main() {
   if (results.length === 0) {
     console.log("\nNo valid breakout found.");
     console.log("\n提示: 條件較嚴格，可能需要調整參數：");
-    console.log(`  - COMPRESSION_RANGE_RATIO: ${COMPRESSION_RANGE_RATIO} (目前需 < 12%)`);
-    console.log(`  - BREAKOUT_VOLUME_MULTIPLIER: ${BREAKOUT_VOLUME_MULTIPLIER} (目前需 > 1.5倍)`);
-    console.log(`  - 突破價格需 > 阻力 * 1.002 (0.2%)`);
-    console.log(`  - 回踩低點需 >= 阻力 * 0.995 且收盤 > 阻力`);
+    console.log(`  - COMPRESSION_RANGE_RATIO: ${CONFIG.COMPRESSION_RANGE_RATIO} (目前需 < ${(CONFIG.COMPRESSION_RANGE_RATIO * 100).toFixed(1)}%)`);
+    console.log(`  - BREAKOUT_VOLUME_MULTIPLIER: ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER} (目前需 > ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER}倍)`);
+    console.log(`  - 突破價格需 > 阻力 * ${CONFIG.BREAKOUT_PRICE_MULTIPLIER} (${((CONFIG.BREAKOUT_PRICE_MULTIPLIER - 1) * 100).toFixed(2)}%)`);
+    console.log(`  - 回踩低點需 >= 阻力 * ${CONFIG.RETEST_LOW_MULTIPLIER} (${((1 - CONFIG.RETEST_LOW_MULTIPLIER) * 100).toFixed(1)}%) 且收盤 > 阻力`);
   } else {
     console.log("\n=== 結果摘要 ===");
     console.table(results);

@@ -9,14 +9,14 @@ const exchange = new ccxt.binanceusdm({
 });
 
 const SYMBOLS = [
-  "BTC/USDT",
-  "ETH/USDT",
-  "SOL/USDT",
-  "AVAX/USDT",
-  "LINK/USDT",
-  "BNB/USDT",
-  "OP/USDT",
-  "ARB/USDT",
+  "BTC/USDT:USDT",
+  "ETH/USDT:USDT",
+  "SOL/USDT:USDT",
+  "AVAX/USDT:USDT",
+  "LINK/USDT:USDT",
+  "BNB/USDT:USDT",
+  "OP/USDT:USDT",
+  "ARB/USDT:USDT",
 ];
 
 const COMPRESSION_RANGE_RATIO = 0.12;
@@ -46,12 +46,12 @@ async function fetchOHLCV(
 ): Promise<Candle[]> {
   const raw = await exchange.fetchOHLCV(symbol, timeframe, undefined, limit);
   return raw.map((c) => ({
-    timestamp: c[0],
-    open: c[1],
-    high: c[2],
-    low: c[3],
-    close: c[4],
-    volume: c[5],
+    timestamp: c[0] as number,
+    open: c[1] as number,
+    high: c[2] as number,
+    low: c[3] as number,
+    close: c[4] as number,
+    volume: c[5] as number,
   }));
 }
 
@@ -156,4 +156,7 @@ async function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
+});

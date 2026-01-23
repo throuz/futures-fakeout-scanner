@@ -24,16 +24,16 @@ const CONFIG = {
   // ===== 盤整檢查參數 =====
   /**
    * 盤整檢查：最近N根K線的範圍比例需小於此值才算盤整
-   * 當前: 0.12 (12%) - 範圍越小越嚴格
+   * 當前: 0.25 (25%) - 範圍越小越嚴格
    * 放寬: 0.15-0.20 (15%-20%) - 允許更大的價格波動範圍
    */
-  COMPRESSION_RANGE_RATIO: 0.2,
+  COMPRESSION_RANGE_RATIO: 0.25,
   /**
    * 盤整檢查：使用最近多少根4h K線來判斷盤整
-   * 當前: 40根 (約6.7天)
+   * 當前: 25根 (約4.2天)
    * 放寬: 30-35根 - 縮短判斷週期，更容易符合
    */
-  COMPRESSION_CANDLE_COUNT: 30,
+  COMPRESSION_CANDLE_COUNT: 25,
 
   // ===== 突破檢查參數 =====
   /**
@@ -44,10 +44,10 @@ const CONFIG = {
   BREAKOUT_CANDLE_COUNT: 50,
   /**
    * 突破檢查：成交量需大於平均成交量的多少倍才算放量
-   * 當前: 1.5倍 - 倍數越高越嚴格
+   * 當前: 1.1倍 - 倍數越高越嚴格
    * 放寬: 1.2-1.3倍 - 降低成交量要求
    */
-  BREAKOUT_VOLUME_MULTIPLIER: 1.2,
+  BREAKOUT_VOLUME_MULTIPLIER: 1.1,
   /**
    * 突破檢查：成交量移動平均線的週期
    * 當前: 20根
@@ -56,18 +56,18 @@ const CONFIG = {
   BREAKOUT_VOLUME_MA_PERIOD: 20,
   /**
    * 突破檢查：收盤價需大於阻力位的多少倍才算突破
-   * 當前: 1.002 (0.2%) - 倍數越高越嚴格
+   * 當前: 1.0005 (0.05%) - 倍數越高越嚴格
    * 放寬: 1.001 (0.1%) - 降低突破幅度要求
    */
-  BREAKOUT_PRICE_MULTIPLIER: 1.001,
+  BREAKOUT_PRICE_MULTIPLIER: 1.0005,
 
   // ===== 回踩檢查參數 =====
   /**
    * 回踩檢查：低點需大於等於阻力位的多少倍
-   * 當前: 0.995 (99.5%) - 允許回踩到阻力位下方0.5%
+   * 當前: 0.97 (97%) - 允許回踩到阻力位下方3%
    * 放寬: 0.99-0.992 (99%-99.2%) - 允許更深的回踩
    */
-  RETEST_LOW_MULTIPLIER: 0.99,
+  RETEST_LOW_MULTIPLIER: 0.97,
   /** 回踩檢查：收盤價需大於阻力位 */
 
   // ===== K線數據參數 =====
@@ -209,12 +209,12 @@ async function fetchOHLCV(
 
 function sma(values: number[], period: number): number[] {
   const result: number[] = new Array(values.length);
-  
+
   // 前 period 個元素為 NaN
   for (let i = 0; i < period && i < values.length; i++) {
     result[i] = NaN;
   }
-  
+
   // 計算第一個有效值
   if (values.length > period) {
     let sum = 0;
@@ -222,14 +222,14 @@ function sma(values: number[], period: number): number[] {
       sum += values[i];
     }
     result[period] = sum / period;
-    
+
     // 使用滑動窗口計算後續值（O(n) 而非 O(n²)）
     for (let i = period + 1; i < values.length; i++) {
       sum = sum - values[i - period - 1] + values[i - 1];
       result[i] = sum / period;
     }
   }
-  
+
   return result;
 }
 
@@ -240,7 +240,7 @@ function sma(values: number[], period: number): number[] {
 // 盤整 / 收斂
 function isCompression(candles: Candle[]): boolean {
   const recent = candles.slice(-CONFIG.COMPRESSION_CANDLE_COUNT);
-  
+
   // 單次遍歷找出最高和最低
   let maxHigh = recent[0].high;
   let minLow = recent[0].low;

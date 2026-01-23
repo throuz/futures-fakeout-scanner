@@ -174,26 +174,42 @@ function isValidRetest(candles: Candle[], resistance: number): boolean {
    主流程
 ======================= */
 
-async function scanSymbol(symbol: string) {
+async function scanSymbol(symbol: string): Promise<{
+  result: {
+    symbol: string;
+    resistance: string;
+    status: string;
+  } | null;
+  stage: "compression" | "breakout" | "retest" | "error" | "success";
+}> {
   try {
     const candles4h = await fetchOHLCV(symbol, "4h");
 
-    if (!isCompression(candles4h)) return null;
+    if (!isCompression(candles4h)) {
+      return { result: null, stage: "compression" };
+    }
 
     const breakout = isBreakout(candles4h);
-    if (!breakout.ok) return null;
+    if (!breakout.ok) {
+      return { result: null, stage: "breakout" };
+    }
 
     const candles15m = await fetchOHLCV(symbol, "15m", 100);
-    if (!isValidRetest(candles15m, breakout.resistance)) return null;
+    if (!isValidRetest(candles15m, breakout.resistance)) {
+      return { result: null, stage: "retest" };
+    }
 
     return {
-      symbol,
-      resistance: breakout.resistance.toFixed(4),
-      status: "BREAKOUT_CONFIRMED",
+      result: {
+        symbol,
+        resistance: breakout.resistance.toFixed(4),
+        status: "BREAKOUT_CONFIRMED",
+      },
+      stage: "success",
     };
   } catch (err) {
     console.error(`Error on ${symbol}`, err);
-    return null;
+    return { result: null, stage: "error" };
   }
 }
 
@@ -204,32 +220,58 @@ async function main() {
   console.log(`Loaded ${symbols.length} tradable symbols.\n`);
 
   const results = [];
+  const stats = {
+    compression: 0,
+    breakout: 0,
+    retest: 0,
+    error: 0,
+    success: 0,
+  };
 
   const startedAtMs = Date.now();
   let done = 0;
   updateProgressLine({ done, total: symbols.length, startedAtMs });
 
   for (const symbol of symbols) {
-    const res = await scanSymbol(symbol);
+    const scanResult = await scanSymbol(symbol);
     done += 1;
+    stats[scanResult.stage] += 1;
     updateProgressLine({
       done,
       total: symbols.length,
       startedAtMs,
       currentSymbol: symbol,
     });
-    if (res) {
-      results.push(res);
-      console.log("FOUND:", res);
+    if (scanResult.result) {
+      results.push(scanResult.result);
+      console.log("FOUND:", scanResult.result);
     }
   }
 
   if (process.stdout.isTTY) process.stdout.write("\n");
 
+  console.log("\n=== 掃描統計 ===");
+  console.log(`總數: ${symbols.length}`);
+  console.log(`通過盤整檢查: ${symbols.length - stats.compression} (${((symbols.length - stats.compression) / symbols.length * 100).toFixed(1)}%)`);
+  console.log(`通過突破檢查: ${stats.breakout + stats.retest + stats.success} (${((stats.breakout + stats.retest + stats.success) / symbols.length * 100).toFixed(1)}%)`);
+  console.log(`通過回踩檢查: ${stats.retest + stats.success} (${((stats.retest + stats.success) / symbols.length * 100).toFixed(1)}%)`);
+  console.log(`最終符合條件: ${stats.success} (${(stats.success / symbols.length * 100).toFixed(1)}%)`);
+  console.log(`錯誤: ${stats.error}`);
+  console.log("\n=== 過濾階段 ===");
+  console.log(`❌ 未通過盤整檢查: ${stats.compression}`);
+  console.log(`❌ 未通過突破檢查: ${stats.breakout}`);
+  console.log(`❌ 未通過回踩檢查: ${stats.retest}`);
+  console.log(`✅ 完全符合條件: ${stats.success}`);
+
   if (results.length === 0) {
-    console.log("No valid breakout found.");
+    console.log("\nNo valid breakout found.");
+    console.log("\n提示: 條件較嚴格，可能需要調整參數：");
+    console.log(`  - COMPRESSION_RANGE_RATIO: ${COMPRESSION_RANGE_RATIO} (目前需 < 12%)`);
+    console.log(`  - BREAKOUT_VOLUME_MULTIPLIER: ${BREAKOUT_VOLUME_MULTIPLIER} (目前需 > 1.5倍)`);
+    console.log(`  - 突破價格需 > 阻力 * 1.002 (0.2%)`);
+    console.log(`  - 回踩低點需 >= 阻力 * 0.995 且收盤 > 阻力`);
   } else {
-    console.log("\nSummary:");
+    console.log("\n=== 結果摘要 ===");
     console.table(results);
   }
 }

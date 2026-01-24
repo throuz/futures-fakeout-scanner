@@ -70,6 +70,45 @@ const CONFIG = {
   RETEST_LOW_MULTIPLIER: 0.97,
   /** 回踩檢查：收盤價需大於阻力位 */
 
+  // ===== 止盈止損參數 =====
+  /**
+   * 止損方式：
+   * - "resistance_below": 止損設在阻力位下方（推薦用於突破策略）
+   * - "compression_low": 止損設在盤整區間最低點下方
+   * - "atr": 基於ATR動態止損
+   */
+  STOP_LOSS_METHOD: "resistance_below" as
+    | "resistance_below"
+    | "compression_low"
+    | "atr",
+  /**
+   * 止損：阻力位下方的百分比（當 STOP_LOSS_METHOD = "resistance_below" 時使用）
+   * 例如: 0.02 = 阻力位下方2%
+   */
+  STOP_LOSS_BELOW_RESISTANCE: 0.02,
+  /**
+   * 止盈：風險回報比（止盈距離 / 止損距離）
+   * 例如: 2.0 = 止盈距離是止損距離的2倍（2:1風險回報比）
+   * 例如: 3.0 = 止盈距離是止損距離的3倍（3:1風險回報比）
+   */
+  TAKE_PROFIT_RISK_REWARD_RATIO: 2.5,
+  /**
+   * 是否啟用追蹤止損
+   * true: 價格上漲後，止損會跟隨上移（保護利潤）
+   * false: 固定止損
+   */
+  USE_TRAILING_STOP: true,
+  /**
+   * 追蹤止損：當價格上漲多少百分比後，開始啟用追蹤止損
+   * 例如: 0.03 = 當價格上漲3%後，開始追蹤止損
+   */
+  TRAILING_STOP_ACTIVATION: 0.03,
+  /**
+   * 追蹤止損：止損跟隨價格的距離（百分比）
+   * 例如: 0.015 = 止損設在最高價下方1.5%
+   */
+  TRAILING_STOP_DISTANCE: 0.015,
+
   // ===== K線數據參數 =====
   /** 4h K線：獲取多少根K線數據 */
   CANDLE_4H_LIMIT: 200,
@@ -292,6 +331,91 @@ function isValidRetest(candles: Candle[], resistance: number): boolean {
   );
 }
 
+// 計算 ATR (Average True Range)
+function calculateATR(candles: Candle[], period: number = 14): number {
+  if (candles.length < period + 1) return 0;
+
+  const trueRanges: number[] = [];
+  for (let i = candles.length - period; i < candles.length; i++) {
+    const current = candles[i];
+    const previous = candles[i - 1];
+    const tr = Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previous.close),
+      Math.abs(current.low - previous.close),
+    );
+    trueRanges.push(tr);
+  }
+
+  return trueRanges.reduce((sum, tr) => sum + tr, 0) / trueRanges.length;
+}
+
+// 計算止盈止損
+function calculateStopLossAndTakeProfit(
+  entryPrice: number,
+  resistance: number,
+  compressionLow?: number,
+  candles?: Candle[],
+): {
+  stopLoss: number;
+  takeProfit: number;
+  riskRewardRatio: number;
+  stopLossMethod: string;
+} {
+  let stopLoss: number;
+  let stopLossMethod: string;
+
+  switch (CONFIG.STOP_LOSS_METHOD) {
+    case "compression_low":
+      if (compressionLow === undefined) {
+        // 如果沒有提供盤整低點，回退到阻力位下方
+        stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE);
+        stopLossMethod = "resistance_below (fallback)";
+      } else {
+        stopLoss = compressionLow * 0.995; // 盤整低點下方0.5%
+        stopLossMethod = "compression_low";
+      }
+      break;
+
+    case "atr":
+      if (!candles || candles.length < 15) {
+        // 如果沒有足夠的K線數據，回退到阻力位下方
+        stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE);
+        stopLossMethod = "resistance_below (fallback)";
+      } else {
+        const atr = calculateATR(candles, 14);
+        stopLoss = entryPrice - atr * 1.5; // 入場價下方1.5倍ATR
+        stopLossMethod = "atr";
+      }
+      break;
+
+    case "resistance_below":
+    default:
+      stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE);
+      stopLossMethod = "resistance_below";
+      break;
+  }
+
+  // 確保止損不會高於入場價（做多時）
+  stopLoss = Math.min(stopLoss, entryPrice * 0.99);
+
+  // 計算止盈（基於風險回報比）
+  const risk = entryPrice - stopLoss;
+  const takeProfit = entryPrice + risk * CONFIG.TAKE_PROFIT_RISK_REWARD_RATIO;
+
+  // 計算實際風險回報比
+  const actualReward = takeProfit - entryPrice;
+  const actualRiskRewardRatio =
+    risk > 0 ? actualReward / risk : CONFIG.TAKE_PROFIT_RISK_REWARD_RATIO;
+
+  return {
+    stopLoss,
+    takeProfit,
+    riskRewardRatio: actualRiskRewardRatio,
+    stopLossMethod,
+  };
+}
+
 /* =======================
    並行處理工具
 ======================= */
@@ -332,8 +456,9 @@ async function pMap<T, R>(
 async function scanSymbol(symbol: string): Promise<{
   result: {
     symbol: string;
-    resistance: string;
-    status: string;
+    entryPrice: string;
+    stopLoss: string;
+    takeProfit: string;
   } | null;
   stage: "compression" | "breakout" | "retest" | "error" | "success";
 }> {
@@ -354,25 +479,49 @@ async function scanSymbol(symbol: string): Promise<{
       return { result: null, stage: "retest" };
     }
 
+    // 計算盤整區間最低點（用於止損計算）
+    const recent4h = candles4h.slice(-CONFIG.COMPRESSION_CANDLE_COUNT);
+    let compressionLow = recent4h[0].low;
+    for (let i = 1; i < recent4h.length; i++) {
+      if (recent4h[i].low < compressionLow) {
+        compressionLow = recent4h[i].low;
+      }
+    }
+
+    // 入場價：使用15m K線的最後收盤價（回踩確認後的價格）
+    const entryPrice = candles15m[candles15m.length - 1].close;
+
+    // 計算止盈止損
+    const sltp = calculateStopLossAndTakeProfit(
+      entryPrice,
+      breakout.resistance,
+      compressionLow,
+      candles4h,
+    );
+
+    const result: {
+      symbol: string;
+      entryPrice: string;
+      stopLoss: string;
+      takeProfit: string;
+    } = {
+      symbol,
+      entryPrice: entryPrice.toFixed(4),
+      stopLoss: sltp.stopLoss.toFixed(4),
+      takeProfit: sltp.takeProfit.toFixed(4),
+    };
+
     return {
-      result: {
-        symbol,
-        resistance: breakout.resistance.toFixed(4),
-        status: "BREAKOUT_CONFIRMED",
-      },
+      result,
       stage: "success",
     };
   } catch (err) {
-    console.error(`Error on ${symbol}`, err);
     return { result: null, stage: "error" };
   }
 }
 
 async function main() {
-  console.log("Scanning futures market...\n");
-
   const symbols = await getAllTradableSymbols();
-  console.log(`Loaded ${symbols.length} tradable symbols.\n`);
 
   const results = [];
   const stats = {
@@ -421,50 +570,15 @@ async function main() {
     stats[scanResult.stage] += 1;
     if (scanResult.result) {
       results.push(scanResult.result);
-      console.log("FOUND:", scanResult.result);
     }
   }
 
   if (process.stdout.isTTY) process.stdout.write("\n");
 
-  console.log("\n=== 掃描統計 ===");
-  console.log(`總數: ${symbols.length}`);
-  console.log(
-    `通過盤整檢查: ${symbols.length - stats.compression} (${(((symbols.length - stats.compression) / symbols.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `通過突破檢查: ${stats.breakout + stats.retest + stats.success} (${(((stats.breakout + stats.retest + stats.success) / symbols.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `通過回踩檢查: ${stats.retest + stats.success} (${(((stats.retest + stats.success) / symbols.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(
-    `最終符合條件: ${stats.success} (${((stats.success / symbols.length) * 100).toFixed(1)}%)`,
-  );
-  console.log(`錯誤: ${stats.error}`);
-  console.log("\n=== 過濾階段 ===");
-  console.log(`❌ 未通過盤整檢查: ${stats.compression}`);
-  console.log(`❌ 未通過突破檢查: ${stats.breakout}`);
-  console.log(`❌ 未通過回踩檢查: ${stats.retest}`);
-  console.log(`✅ 完全符合條件: ${stats.success}`);
-
   if (results.length === 0) {
-    console.log("\nNo valid breakout found.");
-    console.log("\n提示: 條件較嚴格，可能需要調整參數：");
-    console.log(
-      `  - COMPRESSION_RANGE_RATIO: ${CONFIG.COMPRESSION_RANGE_RATIO} (目前需 < ${(CONFIG.COMPRESSION_RANGE_RATIO * 100).toFixed(1)}%)`,
-    );
-    console.log(
-      `  - BREAKOUT_VOLUME_MULTIPLIER: ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER} (目前需 > ${CONFIG.BREAKOUT_VOLUME_MULTIPLIER}倍)`,
-    );
-    console.log(
-      `  - 突破價格需 > 阻力 * ${CONFIG.BREAKOUT_PRICE_MULTIPLIER} (${((CONFIG.BREAKOUT_PRICE_MULTIPLIER - 1) * 100).toFixed(2)}%)`,
-    );
-    console.log(
-      `  - 回踩低點需 >= 阻力 * ${CONFIG.RETEST_LOW_MULTIPLIER} (${((1 - CONFIG.RETEST_LOW_MULTIPLIER) * 100).toFixed(1)}%) 且收盤 > 阻力`,
-    );
+    console.log(`\n掃描完成: ${symbols.length} 個標的，未找到符合條件的突破機會`);
   } else {
-    console.log("\n=== 結果摘要 ===");
+    console.log(`\n找到 ${results.length} 個符合條件的突破機會:\n`);
     console.table(results);
   }
 }

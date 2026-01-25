@@ -13,10 +13,6 @@ const CONFIG = {
   BREAKOUT_VOLUME_MA_PERIOD: 20,
   BREAKOUT_PRICE_MULTIPLIER: 1.0005,
   RETEST_LOW_MULTIPLIER: 0.97,
-  STOP_LOSS_METHOD: "resistance_below" as
-    | "resistance_below"
-    | "compression_low"
-    | "atr",
   STOP_LOSS_BELOW_RESISTANCE: 0.02,
   TAKE_PROFIT_RISK_REWARD_RATIO: 2.5,
   CANDLE_4H_LIMIT: 200,
@@ -192,59 +188,22 @@ function isValidRetest(candles: Candle[], resistance: number): boolean {
   );
 }
 
-function calculateATR(candles: Candle[], period: number = 14): number {
-  if (candles.length < period + 1) return 0;
-  const trueRanges: number[] = [];
-  for (let i = candles.length - period; i < candles.length; i++) {
-    const current = candles[i];
-    const previous = candles[i - 1];
-    const tr = Math.max(
-      current.high - current.low,
-      Math.abs(current.high - previous.close),
-      Math.abs(current.low - previous.close),
-    );
-    trueRanges.push(tr);
-  }
-  return trueRanges.reduce((sum, tr) => sum + tr, 0) / trueRanges.length;
-}
-
 function calculateStopLossAndTakeProfit(
   entryPrice: number,
   resistance: number,
-  compressionLow?: number,
-  candles?: Candle[],
 ): {
   stopLoss: number;
   takeProfit: number;
 } {
-  let stopLoss: number;
+  // 如果入場價接近阻力位（距離小於1%），使用更大的緩衝區（1.5倍）
+  const distanceFromResistance = (entryPrice - resistance) / resistance;
+  const bufferMultiplier = distanceFromResistance < 0.01 ? 1.5 : 1.0;
+  let stopLoss =
+    resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE * bufferMultiplier);
 
-  switch (CONFIG.STOP_LOSS_METHOD) {
-    case "compression_low":
-      if (compressionLow === undefined) {
-        stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE);
-      } else {
-        stopLoss = compressionLow * 0.99;
-      }
-      break;
-    case "atr":
-      if (!candles || candles.length < 15) {
-        stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE);
-      } else {
-        const atr = calculateATR(candles, 14);
-        stopLoss = entryPrice - atr * 2.0;
-      }
-      break;
-    case "resistance_below":
-    default:
-      const distanceFromResistance = (entryPrice - resistance) / resistance;
-      const bufferMultiplier = distanceFromResistance < 0.01 ? 1.5 : 1.0;
-      stopLoss =
-        resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE * bufferMultiplier);
-      break;
-  }
-
+  // 確保止損不會高於入場價（做多時）
   stopLoss = Math.min(stopLoss, entryPrice * 0.99);
+
   const risk = entryPrice - stopLoss;
   const takeProfit = entryPrice + risk * CONFIG.TAKE_PROFIT_RISK_REWARD_RATIO;
 
@@ -296,21 +255,8 @@ async function scanSymbol(symbol: string): Promise<{
     const candles15m = await fetchOHLCV(symbol, "15m");
     if (!isValidRetest(candles15m, breakout.resistance)) return null;
 
-    const recent4h = candles4h.slice(-CONFIG.COMPRESSION_CANDLE_COUNT);
-    let compressionLow = recent4h[0].low;
-    for (let i = 1; i < recent4h.length; i++) {
-      if (recent4h[i].low < compressionLow) {
-        compressionLow = recent4h[i].low;
-      }
-    }
-
     const entryPrice = candles15m[candles15m.length - 1].close;
-    const sltp = calculateStopLossAndTakeProfit(
-      entryPrice,
-      breakout.resistance,
-      compressionLow,
-      candles4h,
-    );
+    const sltp = calculateStopLossAndTakeProfit(entryPrice, breakout.resistance);
 
     return {
       symbol: formatSymbolDisplay(symbol),

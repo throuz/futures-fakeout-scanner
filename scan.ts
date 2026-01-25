@@ -1,4 +1,5 @@
 import ccxt from "ccxt";
+import * as readline from "node:readline";
 
 const exchange = new ccxt.binanceusdm({
   enableRateLimit: true,
@@ -20,6 +21,8 @@ const CONFIG = {
   TAKE_PROFIT_RISK_REWARD_RATIO: 2.5,
   CANDLE_4H_LIMIT: 200,
   CANDLE_15M_LIMIT: 100,
+  PROGRESS_BAR_WIDTH: 24,
+  PROGRESS_UPDATE_INTERVAL_MS: 100,
   CONCURRENCY_LIMIT: 10,
 } as const;
 
@@ -51,6 +54,55 @@ async function getAllTradableSymbols(): Promise<string[]> {
 
 function formatSymbolDisplay(symbol: string): string {
   return symbol.split(":")[0];
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0)
+    return `${h}h${String(m).padStart(2, "0")}m${String(ss).padStart(2, "0")}s`;
+  return `${m}m${String(ss).padStart(2, "0")}s`;
+}
+
+function renderProgressBar(
+  done: number,
+  total: number,
+  width = CONFIG.PROGRESS_BAR_WIDTH,
+): string {
+  if (total <= 0) return `[${" ".repeat(width)}]`;
+  const ratio = Math.min(1, Math.max(0, done / total));
+  const filled = Math.round(ratio * width);
+  return `[${"=".repeat(filled)}${" ".repeat(Math.max(0, width - filled))}]`;
+}
+
+function updateProgressLine(opts: {
+  done: number;
+  total: number;
+  startedAtMs: number;
+  currentSymbol?: string;
+}) {
+  if (!process.stdout.isTTY) return;
+
+  const { done, total, startedAtMs, currentSymbol } = opts;
+  const now = Date.now();
+  const elapsedMs = now - startedAtMs;
+  const pct = total > 0 ? ((done / total) * 100).toFixed(1) : "0.0";
+  const rate = done > 0 ? done / Math.max(1, elapsedMs / 1000) : 0;
+  const remaining = Math.max(0, total - done);
+  const etaMs = rate > 0 ? (remaining / rate) * 1000 : 0;
+
+  const line =
+    `${renderProgressBar(done, total)} ` +
+    `${done}/${total} (${pct}%) ` +
+    `elapsed ${formatDuration(elapsedMs)} ` +
+    (rate > 0 ? `ETA ${formatDuration(etaMs)} ` : "") +
+    (currentSymbol ? `| ${formatSymbolDisplay(currentSymbol)}` : "");
+
+  readline.clearLine(process.stdout, 0);
+  readline.cursorTo(process.stdout, 0);
+  process.stdout.write(line);
 }
 
 async function fetchOHLCV(
@@ -273,11 +325,37 @@ async function scanSymbol(symbol: string): Promise<{
 
 async function main() {
   const symbols = await getAllTradableSymbols();
+  const startedAtMs = Date.now();
+  let done = 0;
+
+  updateProgressLine({ done, total: symbols.length, startedAtMs });
+
+  const progressInterval = setInterval(() => {
+    updateProgressLine({
+      done,
+      total: symbols.length,
+      startedAtMs,
+    });
+  }, CONFIG.PROGRESS_UPDATE_INTERVAL_MS);
+
   const scanResults = await pMap(
     symbols,
-    async (symbol) => await scanSymbol(symbol),
+    async (symbol) => {
+      const result = await scanSymbol(symbol);
+      done += 1;
+      return result;
+    },
     CONFIG.CONCURRENCY_LIMIT,
   );
+
+  clearInterval(progressInterval);
+  updateProgressLine({
+    done: symbols.length,
+    total: symbols.length,
+    startedAtMs,
+  });
+
+  if (process.stdout.isTTY) process.stdout.write("\n");
 
   const results = scanResults.filter((r) => r !== null);
 

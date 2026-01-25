@@ -350,6 +350,33 @@ function calculateATR(candles: Candle[], period: number = 14): number {
   return trueRanges.reduce((sum, tr) => sum + tr, 0) / trueRanges.length;
 }
 
+// 計算追蹤止損信息（用於顯示，實際交易時需要實時更新）
+function calculateTrailingStopInfo(
+  entryPrice: number,
+  initialStopLoss: number,
+): {
+  activationPrice: number;
+  trailingStopAtActivation: number;
+  maxTrailingStop: number; // 當價格達到止盈目標時的追蹤止損位置
+} {
+  // 追蹤止損啟用價格
+  const activationPrice = entryPrice * (1 + CONFIG.TRAILING_STOP_ACTIVATION);
+  
+  // 追蹤止損啟用時的止損位置（此時價格剛達到啟用條件）
+  const trailingStopAtActivation = activationPrice * (1 - CONFIG.TRAILING_STOP_DISTANCE);
+  
+  // 假設價格達到固定止盈目標時的追蹤止損位置
+  const risk = entryPrice - initialStopLoss;
+  const takeProfitTarget = entryPrice + risk * CONFIG.TAKE_PROFIT_RISK_REWARD_RATIO;
+  const maxTrailingStop = takeProfitTarget * (1 - CONFIG.TRAILING_STOP_DISTANCE);
+
+  return {
+    activationPrice,
+    trailingStopAtActivation,
+    maxTrailingStop,
+  };
+}
+
 // 計算止盈止損
 function calculateStopLossAndTakeProfit(
   entryPrice: number,
@@ -361,6 +388,7 @@ function calculateStopLossAndTakeProfit(
   takeProfit: number;
   riskRewardRatio: number;
   stopLossMethod: string;
+  initialStopLoss: number; // 初始止損（用於追蹤止損計算）
 } {
   let stopLoss: number;
   let stopLossMethod: string;
@@ -372,7 +400,8 @@ function calculateStopLossAndTakeProfit(
         stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE);
         stopLossMethod = "resistance_below (fallback)";
       } else {
-        stopLoss = compressionLow * 0.995; // 盤整低點下方0.5%
+        // 改進：使用更大的緩衝區（1%而非0.5%），避免被正常波動觸發
+        stopLoss = compressionLow * 0.99; // 盤整低點下方1%
         stopLossMethod = "compression_low";
       }
       break;
@@ -384,24 +413,36 @@ function calculateStopLossAndTakeProfit(
         stopLossMethod = "resistance_below (fallback)";
       } else {
         const atr = calculateATR(candles, 14);
-        stopLoss = entryPrice - atr * 1.5; // 入場價下方1.5倍ATR
+        // 改進：使用2倍ATR而非1.5倍，提供更好的緩衝
+        stopLoss = entryPrice - atr * 2.0; // 入場價下方2倍ATR
         stopLossMethod = "atr";
       }
       break;
 
     case "resistance_below":
     default:
-      stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE);
+      // 改進：如果入場價接近阻力位，使用更大的緩衝區
+      const distanceFromResistance = (entryPrice - resistance) / resistance;
+      const bufferMultiplier = distanceFromResistance < 0.01 ? 1.5 : 1.0; // 如果距離小於1%，使用1.5倍緩衝
+      stopLoss = resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE * bufferMultiplier);
       stopLossMethod = "resistance_below";
       break;
   }
 
   // 確保止損不會高於入場價（做多時）
-  stopLoss = Math.min(stopLoss, entryPrice * 0.99);
+  const initialStopLoss = Math.min(stopLoss, entryPrice * 0.99);
+  stopLoss = initialStopLoss;
 
   // 計算止盈（基於風險回報比）
   const risk = entryPrice - stopLoss;
-  const takeProfit = entryPrice + risk * CONFIG.TAKE_PROFIT_RISK_REWARD_RATIO;
+  let takeProfit = entryPrice + risk * CONFIG.TAKE_PROFIT_RISK_REWARD_RATIO;
+
+  // 改進：如果追蹤止損啟用，計算追蹤止損的潛在止盈位置
+  // 追蹤止損會在價格上漲後保護利潤，但這裡我們仍然計算固定止盈作為初始目標
+  if (CONFIG.USE_TRAILING_STOP) {
+    // 追蹤止損啟用後，止盈可能會被追蹤止損提前觸發
+    // 但我們仍然保留固定止盈作為參考
+  }
 
   // 計算實際風險回報比
   const actualReward = takeProfit - entryPrice;
@@ -413,6 +454,7 @@ function calculateStopLossAndTakeProfit(
     takeProfit,
     riskRewardRatio: actualRiskRewardRatio,
     stopLossMethod,
+    initialStopLoss, // 保存初始止損，用於追蹤止損計算
   };
 }
 
@@ -459,6 +501,13 @@ async function scanSymbol(symbol: string): Promise<{
     entryPrice: string;
     stopLoss: string;
     takeProfit: string;
+    riskRewardRatio: string;
+    stopLossMethod: string;
+    trailingStopInfo?: {
+      activationPrice: string;
+      trailingStopAtActivation: string;
+      maxTrailingStop: string;
+    };
   } | null;
   stage: "compression" | "breakout" | "retest" | "error" | "success";
 }> {
@@ -499,16 +548,37 @@ async function scanSymbol(symbol: string): Promise<{
       candles4h,
     );
 
+    // 計算追蹤止損信息（如果啟用）
+    const trailingStopInfo = CONFIG.USE_TRAILING_STOP
+      ? calculateTrailingStopInfo(entryPrice, sltp.initialStopLoss)
+      : undefined;
+
     const result: {
       symbol: string;
       entryPrice: string;
       stopLoss: string;
       takeProfit: string;
+      riskRewardRatio: string;
+      stopLossMethod: string;
+      trailingStopInfo?: {
+        activationPrice: string;
+        trailingStopAtActivation: string;
+        maxTrailingStop: string;
+      };
     } = {
       symbol,
       entryPrice: entryPrice.toFixed(4),
       stopLoss: sltp.stopLoss.toFixed(4),
       takeProfit: sltp.takeProfit.toFixed(4),
+      riskRewardRatio: sltp.riskRewardRatio.toFixed(2),
+      stopLossMethod: sltp.stopLossMethod,
+      ...(trailingStopInfo && {
+        trailingStopInfo: {
+          activationPrice: trailingStopInfo.activationPrice.toFixed(4),
+          trailingStopAtActivation: trailingStopInfo.trailingStopAtActivation.toFixed(4),
+          maxTrailingStop: trailingStopInfo.maxTrailingStop.toFixed(4),
+        },
+      }),
     };
 
     return {

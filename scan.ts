@@ -198,7 +198,7 @@ function updateProgressLine(opts: {
     `${done}/${total} (${pct}%) ` +
     `elapsed ${formatDuration(elapsedMs)} ` +
     (rate > 0 ? `ETA ${formatDuration(etaMs)} ` : "") +
-    (currentSymbol ? `| ${currentSymbol}` : "");
+    (currentSymbol ? `| ${formatSymbolDisplay(currentSymbol)}` : "");
 
   readline.clearLine(process.stdout, 0);
   readline.cursorTo(process.stdout, 0);
@@ -221,6 +221,15 @@ interface Candle {
 /* =======================
    工具函式
 ======================= */
+
+/**
+ * 格式化 symbol 顯示名稱
+ * 將 "AGT/USDT:USDT" 轉換為 "AGT/USDT" 以便更簡潔的顯示
+ */
+function formatSymbolDisplay(symbol: string): string {
+  // 移除期貨合約的後綴（例如 ":USDT"）
+  return symbol.split(":")[0];
+}
 
 async function fetchOHLCV(
   symbol: string,
@@ -566,7 +575,7 @@ async function scanSymbol(symbol: string): Promise<{
         maxTrailingStop: string;
       };
     } = {
-      symbol,
+      symbol: formatSymbolDisplay(symbol),
       entryPrice: entryPrice.toFixed(4),
       stopLoss: sltp.stopLoss.toFixed(4),
       takeProfit: sltp.takeProfit.toFixed(4),

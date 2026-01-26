@@ -6,11 +6,11 @@
 
 ```bash
 git add .
-git commit -m "Add auto-scan with notifications"
+git commit -m "Add auto-scan with Telegram notifications"
 git push origin main
 ```
 
-### 第二步：配置 Telegram Bot（推荐）
+### 第二步：配置 Telegram Bot
 
 1. **创建 Telegram Bot**
    - 在 Telegram 搜索 `@BotFather`
@@ -29,9 +29,6 @@ git push origin main
    - 点击 "New repository secret"，添加以下 secrets：
 
    ```
-   Name: TELEGRAM_ENABLED
-   Value: true
-   
    Name: TELEGRAM_BOT_TOKEN
    Value: 你的Bot Token
    
@@ -64,42 +61,10 @@ git push origin main
 3. 点击 "Run workflow" 手动触发一次测试
 4. 检查是否收到 Telegram 通知
 
-## 其他通知方式
-
-### Discord Webhook
-
-1. 在 Discord 服务器设置中创建 Webhook
-2. 复制 Webhook URL
-3. 在 GitHub Secrets 中添加：
-
-```
-WEBHOOK_ENABLED=true
-WEBHOOK_URL=你的Discord Webhook URL
-```
-
-### 自定义 Webhook
-
-可以发送到任何支持 POST 请求的 URL，数据格式：
-
-```json
-{
-  "timestamp": "2026-01-26T12:00:00.000Z",
-  "count": 2,
-  "results": [
-    {
-      "symbol": "BTCUSDT",
-      "entryPrice": "45000.0000",
-      "stopLoss": "44100.0000",
-      "takeProfit": "47250.0000"
-    }
-  ]
-}
-```
-
 ## 本地测试通知
 
 1. 复制 `.env.example` 为 `.env`
-2. 填写你的配置
+2. 填写你的 Telegram Bot Token 和 Chat ID
 3. 运行：`npm start`
 
 ## 注意事项

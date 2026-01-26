@@ -32,23 +32,8 @@ jobs:
 
       - name: Run scanner
         env:
-          # Telegram 通知配置（可选）
-          TELEGRAM_ENABLED: ${{ secrets.TELEGRAM_ENABLED }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          
-          # Webhook 通知配置（可选）
-          WEBHOOK_ENABLED: ${{ secrets.WEBHOOK_ENABLED }}
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-          
-          # Email 通知配置（可选，需要额外配置 SMTP）
-          EMAIL_ENABLED: ${{ secrets.EMAIL_ENABLED }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: npm run start:prod
 
       - name: Upload results

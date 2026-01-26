@@ -1,0 +1,61 @@
+name: Futures Breakout Scanner
+
+on:
+  schedule:
+    # 每 4 小时运行一次（UTC 时间）
+    # 可以根据需要调整 cron 表达式
+    # 格式：分钟 小时 日 月 星期
+    # 例如：每 4 小时 = "0 */4 * * *"
+    # 例如：每天 UTC 8:00 = "0 8 * * *"
+    - cron: "0 */4 * * *"
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run scanner
+        env:
+          # Telegram 通知配置（可选）
+          TELEGRAM_ENABLED: ${{ secrets.TELEGRAM_ENABLED }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          
+          # Webhook 通知配置（可选）
+          WEBHOOK_ENABLED: ${{ secrets.WEBHOOK_ENABLED }}
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          
+          # Email 通知配置（可选，需要额外配置 SMTP）
+          EMAIL_ENABLED: ${{ secrets.EMAIL_ENABLED }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURE: ${{ secrets.SMTP_SECURE }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: npm run start:prod
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results
+          path: |
+            dist/
+          retention-days: 7

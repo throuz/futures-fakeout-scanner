@@ -1,5 +1,6 @@
 import ccxt from "ccxt";
 import * as readline from "node:readline";
+import { Notifier, type ScanResult } from "./notify";
 
 const exchange = new ccxt.binanceusdm({
   enableRateLimit: true,
@@ -303,7 +304,7 @@ async function main() {
 
   if (process.stdout.isTTY) process.stdout.write("\n");
 
-  const results = scanResults.filter((r) => r !== null);
+  const results = scanResults.filter((r) => r !== null) as ScanResult[];
 
   if (results.length === 0) {
     console.log(`未找到符合條件的突破機會`);
@@ -311,6 +312,10 @@ async function main() {
     console.log(`找到 ${results.length} 個符合條件的突破機會:\n`);
     console.table(results);
   }
+
+  // 发送通知
+  const notifier = new Notifier();
+  await notifier.notify(results);
 }
 
 main().catch((err) => {

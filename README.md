@@ -7,8 +7,8 @@
 - 🔍 自动扫描所有币安 USDT 期货交易对
 - 📊 检测压缩形态和突破信号
 - 🔔 Telegram 通知支持
-- ☁️ 支持 GitHub Actions 云端自动运行
-- ⏰ 可配置定时扫描
+- ☁️ 支持 GitHub Actions 云端按需运行
+- 💰 完全免费，无需服务器
 
 ## 本地运行
 
@@ -33,7 +33,9 @@ TELEGRAM_BOT_TOKEN=你的机器人Token
 TELEGRAM_CHAT_ID=你的Chat ID
 ```
 
-## 云端自动运行（GitHub Actions）
+## 云端按需运行（GitHub Actions）
+
+**无需服务器，完全免费！** 只需要在 GitHub Actions 页面点击按钮即可触发扫描。
 
 ### 设置步骤
 
@@ -49,25 +51,29 @@ TELEGRAM_CHAT_ID=你的Chat ID
 
 3. **配置 GitHub Secrets**
 
-   进入仓库的 Settings → Secrets and variables → Actions，添加以下 secrets：
+   进入仓库的 Settings → Secrets and variables → Actions，添加：
 
    ```
    TELEGRAM_BOT_TOKEN=你的机器人Token
    TELEGRAM_CHAT_ID=你的Chat ID
    ```
 
-4. **调整扫描频率（可选）**
+4. **触发扫描**
 
-   编辑 `.github/workflows/scan.yml`，修改 cron 表达式：
-   ```yaml
-   - cron: "0 */4 * * *"  # 每 4 小时
-   - cron: "0 8 * * *"    # 每天 UTC 8:00
-   - cron: "0 */2 * * *"  # 每 2 小时
-   ```
+   - 在 GitHub 仓库页面，点击 "Actions" 标签
+   - 选择 "Futures Breakout Scanner" workflow
+   - 点击右侧 "Run workflow" 按钮
+   - 选择分支（通常是 main），点击绿色的 "Run workflow" 按钮
+   - 等待扫描完成，结果会通过 Telegram 发送给你
 
-5. **手动触发**
+### 使用流程
 
-   在 GitHub Actions 页面可以手动触发扫描
+1. 打开 GitHub 仓库 → Actions
+2. 点击 "Run workflow" 按钮
+3. 等待 1-2 分钟
+4. 在 Telegram 收到扫描结果
+
+就是这么简单！不需要任何服务器或持续运行的程序。
 
 ## 扫描策略
 
@@ -88,7 +94,7 @@ TELEGRAM_CHAT_ID=你的Chat ID
 ## 注意事项
 
 - GitHub Actions 免费版每月有运行时间限制（2000 分钟）
-- 建议扫描频率不要过于频繁（建议 2-4 小时一次）
+- 按需运行可以节省运行时间，只在需要时运行
 - 所有配置通过环境变量管理，不会泄露敏感信息
 - 扫描结果仅供参考，不构成投资建议
 

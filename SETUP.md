@@ -1,12 +1,14 @@
 # 快速设置指南
 
-## 云端自动运行设置（GitHub Actions）
+## 云端按需运行设置（GitHub Actions）
+
+**完全免费，无需服务器！** 只需要在 GitHub Actions 页面点击按钮即可触发扫描。
 
 ### 第一步：推送代码到 GitHub
 
 ```bash
 git add .
-git commit -m "Add auto-scan with Telegram notifications"
+git commit -m "Add on-demand scan with Telegram notifications"
 git push origin main
 ```
 
@@ -36,30 +38,14 @@ git push origin main
    Value: 你的Chat ID
    ```
 
-### 第三步：调整扫描频率（可选）
-
-编辑 `.github/workflows/scan.yml`，修改 cron 表达式：
-
-```yaml
-# 每 4 小时运行一次（默认）
-- cron: "0 */4 * * *"
-
-# 每 2 小时运行一次
-- cron: "0 */2 * * *"
-
-# 每天 UTC 8:00 运行
-- cron: "0 8 * * *"
-
-# 每 6 小时运行一次
-- cron: "0 */6 * * *"
-```
-
-### 第四步：测试运行
+### 第三步：触发扫描
 
 1. 在 GitHub 仓库页面，点击 "Actions" 标签
 2. 选择 "Futures Breakout Scanner" workflow
-3. 点击 "Run workflow" 手动触发一次测试
-4. 检查是否收到 Telegram 通知
+3. 点击右侧 "Run workflow" 按钮
+4. 选择分支（通常是 main），点击绿色的 "Run workflow" 按钮
+5. 等待扫描完成（通常 1-2 分钟）
+6. 在 Telegram 收到扫描结果
 
 ## 本地测试通知
 
@@ -70,7 +56,7 @@ git push origin main
 ## 注意事项
 
 - GitHub Actions 免费版每月有 2000 分钟运行时间限制
-- 建议扫描频率不要超过每小时一次
+- 按需运行可以节省运行时间，只在需要时运行
 - 所有敏感信息都通过 GitHub Secrets 管理，不会泄露
 - 扫描结果仅供参考，不构成投资建议
 
@@ -86,5 +72,5 @@ git push origin main
 ### GitHub Actions 没有运行
 
 1. 检查 workflow 文件是否正确推送到仓库
-2. 检查 cron 表达式是否正确
-3. 可以在 Actions 页面手动触发测试
+2. 在 Actions 页面手动触发测试
+3. 检查是否有权限问题

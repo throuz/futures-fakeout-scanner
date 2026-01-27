@@ -1,14 +1,7 @@
 name: Futures Breakout Scanner
 
 on:
-  schedule:
-    # 每 4 小时运行一次（UTC 时间）
-    # 可以根据需要调整 cron 表达式
-    # 格式：分钟 小时 日 月 星期
-    # 例如：每 4 小时 = "0 */4 * * *"
-    # 例如：每天 UTC 8:00 = "0 8 * * *"
-    - cron: "0 */4 * * *"
-  workflow_dispatch: # 允许手动触发
+  workflow_dispatch: # 仅手动触发，按需运行
 
 jobs:
   scan:

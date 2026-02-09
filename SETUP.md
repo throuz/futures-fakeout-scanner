@@ -41,7 +41,7 @@ git push origin main
 ### 第三步：触发扫描
 
 1. 在 GitHub 仓库页面，点击 "Actions" 标签
-2. 选择 "Futures Breakout Scanner" workflow
+2. 选择 "Futures Fakeout Scanner" workflow
 3. 点击右侧 "Run workflow" 按钮
 4. 选择分支（通常是 main），点击绿色的 "Run workflow" 按钮
 5. 等待扫描完成（通常 1-2 分钟）

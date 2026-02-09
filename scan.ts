@@ -186,8 +186,7 @@ function isPotentialTrap(candles: Candle[]): {
   const body = Math.abs(last.close - last.open);
   const upperShadow = last.high - Math.max(last.open, last.close);
   const shootingStar =
-    body > 0 &&
-    upperShadow >= body * CONFIG.FAKEOUT_SHOOTING_STAR_BODY_RATIO;
+    body > 0 && upperShadow >= body * CONFIG.FAKEOUT_SHOOTING_STAR_BODY_RATIO;
 
   return {
     ok: hasPierced && hasFailed,

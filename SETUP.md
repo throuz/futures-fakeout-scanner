@@ -1,10 +1,10 @@
-# 快速设置指南
+# 快速設定指南
 
-## 云端按需运行设置（GitHub Actions）
+## 雲端按需運行設定（GitHub Actions）
 
-**完全免费，无需服务器！** 只需要在 GitHub Actions 页面点击按钮即可触发扫描。
+**完全免費，無需伺服器！** 只需要在 GitHub Actions 頁面點擊按鈕即可觸發掃描。
 
-### 第一步：推送代码到 GitHub
+### 第一步：推送程式碼到 GitHub
 
 ```bash
 git add .
@@ -12,23 +12,23 @@ git commit -m "Add on-demand scan with Telegram notifications"
 git push origin main
 ```
 
-### 第二步：配置 Telegram Bot
+### 第二步：設定 Telegram Bot
 
-1. **创建 Telegram Bot**
-   - 在 Telegram 搜索 `@BotFather`
-   - 发送 `/newbot`
-   - 按提示设置机器人名称和用户名
-   - 保存 Bot Token（格式：`123456789:ABCdefGHIjklMNOpqrsTUVwxyz`）
+1. **建立 Telegram Bot**
+   - 在 Telegram 搜尋 `@BotFather`
+   - 發送 `/newbot`
+   - 依提示設定機器人名稱和使用者名稱
+   - 儲存 Bot Token（格式：`123456789:ABCdefGHIjklMNOpqrsTUVwxyz`）
 
-2. **获取 Chat ID**
-   - 发送 `/start` 给你刚创建的机器人
-   - 访问：`https://api.telegram.org/bot<你的Token>/getUpdates`
-   - 在返回的 JSON 中找到 `"chat":{"id":123456789}`，这就是你的 Chat ID
+2. **取得 Chat ID**
+   - 發送 `/start` 給你剛建立的機器人
+   - 造訪：`https://api.telegram.org/bot<你的Token>/getUpdates`
+   - 在回傳的 JSON 中找到 `"chat":{"id":123456789}`，這就是你的 Chat ID
 
-3. **配置 GitHub Secrets**
-   - 进入你的 GitHub 仓库
-   - 点击 Settings → Secrets and variables → Actions
-   - 点击 "New repository secret"，添加以下 secrets：
+3. **設定 GitHub Secrets**
+   - 進入你的 GitHub 倉庫
+   - 點擊 Settings → Secrets and variables → Actions
+   - 點擊 "New repository secret"，新增以下 secrets：
 
    ```
    Name: TELEGRAM_BOT_TOKEN
@@ -38,39 +38,39 @@ git push origin main
    Value: 你的Chat ID
    ```
 
-### 第三步：触发扫描
+### 第三步：觸發掃描
 
-1. 在 GitHub 仓库页面，点击 "Actions" 标签
-2. 选择 "Futures Fakeout Scanner" workflow
-3. 点击右侧 "Run workflow" 按钮
-4. 选择分支（通常是 main），点击绿色的 "Run workflow" 按钮
-5. 等待扫描完成（通常 1-2 分钟）
-6. 在 Telegram 收到扫描结果
+1. 在 GitHub 倉庫頁面，點擊 "Actions" 標籤
+2. 選擇 "Futures Fakeout Scanner" workflow
+3. 點擊右側 "Run workflow" 按鈕
+4. 選擇分支（通常是 main），點擊綠色的 "Run workflow" 按鈕
+5. 等待掃描完成（通常 1–2 分鐘）
+6. 在 Telegram 收到掃描結果
 
-## 本地测试通知
+## 本地測試通知
 
-1. 复制 `.env.example` 为 `.env`
-2. 填写你的 Telegram Bot Token 和 Chat ID
-3. 运行：`npm start`
+1. 複製 `.env.example` 為 `.env`
+2. 填寫你的 Telegram Bot Token 和 Chat ID
+3. 執行：`npm start`
 
-## 注意事项
+## 注意事項
 
-- GitHub Actions 免费版每月有 2000 分钟运行时间限制
-- 按需运行可以节省运行时间，只在需要时运行
-- 所有敏感信息都通过 GitHub Secrets 管理，不会泄露
-- 扫描结果仅供参考，不构成投资建议
+- GitHub Actions 免費版每月有 2000 分鐘運行時間限制
+- 按需運行可節省運行時間，只在需要時執行
+- 所有敏感資訊皆透過 GitHub Secrets 管理，不會洩漏
+- 掃描結果僅供參考，不構成投資建議
 
-## 故障排查
+## 故障排除
 
-### 没有收到通知
+### 沒有收到通知
 
-1. 检查 GitHub Secrets 是否正确配置
-2. 检查 Telegram Bot Token 和 Chat ID 是否正确
-3. 查看 GitHub Actions 日志，检查是否有错误
-4. 确认 Bot 已启动（发送 `/start` 给机器人）
+1. 檢查 GitHub Secrets 是否正確設定
+2. 檢查 Telegram Bot Token 和 Chat ID 是否正確
+3. 查看 GitHub Actions 日誌，檢查是否有錯誤
+4. 確認 Bot 已啟動（發送 `/start` 給機器人）
 
-### GitHub Actions 没有运行
+### GitHub Actions 沒有運行
 
-1. 检查 workflow 文件是否正确推送到仓库
-2. 在 Actions 页面手动触发测试
-3. 检查是否有权限问题
+1. 檢查 workflow 檔案是否正確推送到倉庫
+2. 在 Actions 頁面手動觸發測試
+3. 檢查是否有權限問題

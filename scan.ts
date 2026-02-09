@@ -7,17 +7,19 @@ const exchange = new ccxt.binanceusdm({
 });
 
 const CONFIG = {
-  COMPRESSION_RANGE_RATIO: 0.25,
-  COMPRESSION_CANDLE_COUNT: 25,
-  BREAKOUT_CANDLE_COUNT: 50,
-  BREAKOUT_VOLUME_MULTIPLIER: 1.1,
-  BREAKOUT_VOLUME_MA_PERIOD: 20,
-  BREAKOUT_PRICE_MULTIPLIER: 1.0005,
-  RETEST_LOW_MULTIPLIER: 0.97,
-  STOP_LOSS_BELOW_RESISTANCE: 0.02,
-  TAKE_PROFIT_RISK_REWARD_RATIO: 2.5,
+  // 假突破做空 (Fakeout Short)
+  FAKEOUT_LOOKBACK: 50,
+  FAKEOUT_PIERCE_MULTIPLIER: 1.005, // 最高價需突破阻力多少才算「刺穿」
+  FAKEOUT_STOP_ABOVE_HIGH: 1.002, // 止損設在假突破高點之上
+  FAKEOUT_RISK_REWARD_RATIO: 2,
+  FAKEOUT_VOLUME_MA_PERIOD: 20,
+  FAKEOUT_VOLUME_MIN_MULTIPLIER: 1.2, // 當根 K 量至少為均量 1.2 倍（陷阱常伴隨放量）
+  FAKEOUT_SHOOTING_STAR_BODY_RATIO: 1.0, // 上影線 >= 實體倍數時視為射擊之星
+  FAKEOUT_REQUIRE_VOLUME_OR_SHOOTING_STAR: true, // 至少滿足：放量 或 射擊之星
+  FAKEOUT_PREFER_1D_DOWNTREND: false, // 若 true 僅在日線空頭時出信號（送分題模式）
   CANDLE_4H_LIMIT: 200,
   CANDLE_15M_LIMIT: 100,
+  CANDLE_1D_LIMIT: 60,
   PROGRESS_BAR_WIDTH: 24,
   PROGRESS_UPDATE_INTERVAL_MS: 100,
   CONCURRENCY_LIMIT: 10,
@@ -104,11 +106,15 @@ function updateProgressLine(opts: {
 
 async function fetchOHLCV(
   symbol: string,
-  timeframe: "15m" | "4h",
+  timeframe: "15m" | "4h" | "1d",
   limit?: number,
 ): Promise<Candle[]> {
   const defaultLimit =
-    timeframe === "4h" ? CONFIG.CANDLE_4H_LIMIT : CONFIG.CANDLE_15M_LIMIT;
+    timeframe === "4h"
+      ? CONFIG.CANDLE_4H_LIMIT
+      : timeframe === "1d"
+        ? CONFIG.CANDLE_1D_LIMIT
+        : CONFIG.CANDLE_15M_LIMIT;
   const actualLimit = limit ?? defaultLimit;
   const raw = await exchange.fetchOHLCV(
     symbol,
@@ -145,73 +151,61 @@ function sma(values: number[], period: number): number[] {
   return result;
 }
 
-function isCompression(candles: Candle[]): boolean {
-  const recent = candles.slice(-CONFIG.COMPRESSION_CANDLE_COUNT);
-  let maxHigh = recent[0].high;
-  let minLow = recent[0].low;
-  for (let i = 1; i < recent.length; i++) {
-    if (recent[i].high > maxHigh) maxHigh = recent[i].high;
-    if (recent[i].low < minLow) minLow = recent[i].low;
-  }
-  const range = maxHigh - minLow;
-  const rangeRatio = range / recent[recent.length - 1].close;
-  return rangeRatio < CONFIG.COMPRESSION_RANGE_RATIO;
-}
-
-function isBreakout(candles: Candle[]): {
+/** 多頭陷阱特徵：過去 N 根最高價當阻力，最後一根曾刺穿但收盤跌回下方 */
+function isPotentialTrap(candles: Candle[]): {
   ok: boolean;
   resistance: number;
+  last: Candle;
+  volumeOK: boolean;
+  shootingStar: boolean;
 } {
-  const recent = candles.slice(-CONFIG.BREAKOUT_CANDLE_COUNT);
+  const recent = candles.slice(-CONFIG.FAKEOUT_LOOKBACK);
+  if (recent.length < 2) {
+    return {
+      ok: false,
+      resistance: 0,
+      last: candles[candles.length - 1],
+      volumeOK: false,
+      shootingStar: false,
+    };
+  }
   const last = recent[recent.length - 1];
   let resistance = 0;
   for (let i = 0; i < recent.length - 1; i++) {
-    if (recent[i].high > resistance) {
-      resistance = recent[i].high;
-    }
+    if (recent[i].high > resistance) resistance = recent[i].high;
   }
+  const hasPierced = last.high > resistance * CONFIG.FAKEOUT_PIERCE_MULTIPLIER;
+  const hasFailed = last.close < resistance;
   const volumes = recent.map((c) => c.volume);
-  const volMA = sma(volumes, CONFIG.BREAKOUT_VOLUME_MA_PERIOD);
+  const volMA = sma(volumes, CONFIG.FAKEOUT_VOLUME_MA_PERIOD);
+  const volLast = volMA[volMA.length - 1];
   const volumeOK =
-    last.volume > volMA[volMA.length - 1] * CONFIG.BREAKOUT_VOLUME_MULTIPLIER;
-  const priceOK = last.close > resistance * CONFIG.BREAKOUT_PRICE_MULTIPLIER;
+    !Number.isNaN(volLast) &&
+    volLast > 0 &&
+    last.volume >= volLast * CONFIG.FAKEOUT_VOLUME_MIN_MULTIPLIER;
+  const body = Math.abs(last.close - last.open);
+  const upperShadow = last.high - Math.max(last.open, last.close);
+  const shootingStar =
+    body > 0 &&
+    upperShadow >= body * CONFIG.FAKEOUT_SHOOTING_STAR_BODY_RATIO;
+
   return {
-    ok: priceOK && volumeOK,
+    ok: hasPierced && hasFailed,
     resistance,
+    last,
+    volumeOK,
+    shootingStar,
   };
 }
 
-function isValidRetest(candles: Candle[], resistance: number): boolean {
-  const last = candles[candles.length - 1];
-  return (
-    last.low >= resistance * CONFIG.RETEST_LOW_MULTIPLIER &&
-    last.close > resistance
-  );
-}
-
-function calculateStopLossAndTakeProfit(
-  entryPrice: number,
-  resistance: number,
-): {
-  stopLoss: number;
-  takeProfit: number;
-} {
-  // 如果入場價接近阻力位（距離小於1%），使用更大的緩衝區（1.5倍）
-  const distanceFromResistance = (entryPrice - resistance) / resistance;
-  const bufferMultiplier = distanceFromResistance < 0.01 ? 1.5 : 1.0;
-  let stopLoss =
-    resistance * (1 - CONFIG.STOP_LOSS_BELOW_RESISTANCE * bufferMultiplier);
-
-  // 確保止損不會高於入場價（做多時）
-  stopLoss = Math.min(stopLoss, entryPrice * 0.99);
-
-  const risk = entryPrice - stopLoss;
-  const takeProfit = entryPrice + risk * CONFIG.TAKE_PROFIT_RISK_REWARD_RATIO;
-
-  return {
-    stopLoss,
-    takeProfit,
-  };
+/** 日線是否為空頭趨勢（收盤價在 20 日均線下方，利於 4H 假突破做空） */
+function is1DDowntrend(candles: Candle[]): boolean {
+  if (candles.length < 21) return false;
+  const closes = candles.map((c) => c.close);
+  const ma20 = sma(closes, 20);
+  const lastMA = ma20[ma20.length - 1];
+  const lastClose = candles[candles.length - 1].close;
+  return !Number.isNaN(lastMA) && lastClose < lastMA;
 }
 
 async function pMap<T, R>(
@@ -240,6 +234,7 @@ async function pMap<T, R>(
   return results;
 }
 
+/** 掃描單一標的：獵殺假突破做空（4H 誘多失敗 + 15m 陰線確認） */
 async function scanSymbol(symbol: string): Promise<{
   symbol: string;
   entryPrice: string;
@@ -248,22 +243,34 @@ async function scanSymbol(symbol: string): Promise<{
 } | null> {
   try {
     const candles4h = await fetchOHLCV(symbol, "4h");
-    if (!isCompression(candles4h)) return null;
+    const trap = isPotentialTrap(candles4h);
+    if (!trap.ok) return null;
+    if (
+      CONFIG.FAKEOUT_REQUIRE_VOLUME_OR_SHOOTING_STAR &&
+      !trap.volumeOK &&
+      !trap.shootingStar
+    )
+      return null;
+    if (CONFIG.FAKEOUT_PREFER_1D_DOWNTREND) {
+      const candles1d = await fetchOHLCV(symbol, "1d");
+      if (!is1DDowntrend(candles1d)) return null;
+    }
 
-    const breakout = isBreakout(candles4h);
-    if (!breakout.ok) return null;
-
+    // 15m 確認下跌動能：最後一根為陰線
     const candles15m = await fetchOHLCV(symbol, "15m");
-    if (!isValidRetest(candles15m, breakout.resistance)) return null;
+    const last15m = candles15m[candles15m.length - 1];
+    if (last15m.close >= last15m.open) return null;
 
-    const entryPrice = candles15m[candles15m.length - 1].close;
-    const sltp = calculateStopLossAndTakeProfit(entryPrice, breakout.resistance);
+    const entry = last15m.close;
+    const stopLoss = trap.last.high * CONFIG.FAKEOUT_STOP_ABOVE_HIGH;
+    const risk = stopLoss - entry;
+    const takeProfit = entry - risk * CONFIG.FAKEOUT_RISK_REWARD_RATIO;
 
     return {
       symbol: formatSymbolDisplay(symbol),
-      entryPrice: entryPrice.toFixed(4),
-      stopLoss: sltp.stopLoss.toFixed(4),
-      takeProfit: sltp.takeProfit.toFixed(4),
+      entryPrice: entry.toFixed(4),
+      stopLoss: stopLoss.toFixed(4),
+      takeProfit: takeProfit.toFixed(4),
     };
   } catch (err) {
     return null;
@@ -307,9 +314,9 @@ async function main() {
   const results = scanResults.filter((r) => r !== null) as ScanResult[];
 
   if (results.length === 0) {
-    console.log(`未找到符合條件的突破機會`);
+    console.log(`未找到符合條件的假突破做空機會`);
   } else {
-    console.log(`找到 ${results.length} 個符合條件的突破機會:\n`);
+    console.log(`找到 ${results.length} 個符合條件的假突破做空機會:\n`);
     console.table(results);
   }
 

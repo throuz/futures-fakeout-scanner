@@ -16,10 +16,10 @@ class Notifier {
 
   private formatMessage(results: ScanResult[]): string {
     if (results.length === 0) {
-      return "📊 扫描完成：未找到符合条件的突破机会";
+      return "📊 掃描完成：未找到符合條件的假突破做空機會";
     }
 
-    let message = `🚀 <b>找到 ${results.length} 個符合條件的突破機會</b>\n\n`;
+    let message = `🎯 <b>找到 ${results.length} 個符合條件的假突破做空機會</b>\n\n`;
     results.forEach((result, index) => {
       message += `<b>${index + 1}. ${result.symbol}</b>\n`;
       message += `   入場價: <code>${result.entryPrice}</code>\n`;

@@ -1,4 +1,4 @@
-name: Futures Breakout Scanner
+name: Futures Fakeout Scanner
 
 on:
   workflow_dispatch: # 仅手动触发，按需运行
